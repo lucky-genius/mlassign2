@@ -1,11 +1,12 @@
 # usage：
 # from recommendation import *
 # R_train, R_test = make_R(filename = 'movie_ratings.csv', col_user = 'userId', col_item = 'movieId', col_rating = 'rating')
-# mf = recommendation_system(R_train, R_test, k = 300, alpha = 0.01, _lambda = 0.01, iterations = 20)
-# mf.matrix_factorization()
-# or mf.correlation_similarity(2)
+# mf = matrix_factorization(R_train, R_test)
+# mf.train(k = 300, alpha = 0.01, _lambda = 0.01, iterations = 20)
 # mf.result
 # mf.mse()
+# rs = correlation_similarity(R_train, R_test, 3)
+# rs.test()
 
 import numpy as np
 from astropy.io import ascii
@@ -51,7 +52,7 @@ def make_R(filename, col_user, col_item, col_rating, fraction = 0.8):
     return rTrain, rTest
 
 
-class recommendation_system():
+class matrix_factorization():
 
     def __init__(self, R_train, R_test):
         '''R_train: 2D numpy array; R matrix in with r_{i, j} is the rating that user i given to item j'''
@@ -60,7 +61,7 @@ class recommendation_system():
         self.nUser, self.nItem = R_train.shape
         self.result = None
 
-    def matrix_factorization(self, k, alpha, _lambda, iterations):
+    def train(self, k, alpha, _lambda, iterations):
         '''perform matrix factorization to predict empty entries in a matrix.
         parameters:
             k: int; dimensions of u and v vector
@@ -71,8 +72,7 @@ class recommendation_system():
         self.iterations = iterations
         self._lambda = _lambda
         
-        def sgd():
-            '''stochastic graident descent'''
+        def update():
             for i, j, r in self.samples:
                 # Computer prediction and error
                 if _lambda is not None:
@@ -114,55 +114,91 @@ class recommendation_system():
         # Perform stochastic gradient descent for number of iterations
         for i in range(self.iterations):
             np.random.shuffle(self.samples)
-            sgd()
-#             mse_train, mse_test = self.mse()
-            if (i + 1) % 10 == 0:
-                print("Iteration: %d " % (i + 1))
-#                 print("Iteration: %d ; train error = %.4f; test error = %.4f" % (i + 1, mse_train, mse_test))
+            update()
                 
         if _lambda is not None:
             self.result = self.b + self.b_u[:,np.newaxis] + self.b_i[np.newaxis:,] + self.U.dot(self.V.T)
         else:
             self.result = self.U.dot(self.V.T)
         
-        mse_train, mse_test = self.mse()
+        sigma_train, sigma_test = self.sigma()
         print('training is complete! it took %.2f s' % (time.time() - start_time))
-        print("train error = %.4f; test error = %.4f" % (mse_train, mse_test))
+        print("train error = %.4f; test error = %.4f" % (sigma_train, sigma_test))
         return self.result
     
-    def mse(self):
+    def sigma(self):
         '''Compute the total mean square error for training and testing data'''
-        xTrain, yTrain = self.R_train.nonzero()
-        xTest, yTest = self.R_test.nonzero()
+        iTrain, jTrain = self.R_train.nonzero()
+        iTest, jTest = self.R_test.nonzero()
         trainError, testError = 0, 0
-        for x, y in zip(xTrain, yTrain):
-            trainError += pow(self.R_train[x, y] - self.result[x, y], 2)
+        trainCount, testCount = 0, 0
+        for i, j in zip(iTrain, jTrain):
+            trainError += (self.R_train[i, j] - self.result[i, j])**2
+            trainCount += 1
             
-        for x, y in zip(xTest, yTest):
-            testError += pow(self.R_test[x, y] - self.result[x, y], 2)
-            
-        return np.sqrt(trainError), np.sqrt(testError)
+        for i, j in zip(iTest, jTest):
+            testError += (self.R_test[i, j] - self.result[i, j])**2
+            testCount += 1
         
-    def correlation_similarity(self, k):
-        start_time = time.time()
-        self.result = self.R_train.copy()
-#         R_normal = (R.T - np.nanmean(R, axis = 1)).T # normalizing with the average
+        trainSigma = np.sqrt(trainError)/trainCount
+        testSigma = np.sqrt(testError)/testCount
+        return trainSigma, testSigma
         
-        R_sparse = sparse.csr_matrix(self.R_train)
-        S = cosine_similarity(R_sparse) # similarity 
-        for row in np.arange(self.nUser): # for all users
-            idxS = np.argsort(S[row])
-#             for col in np.where(R[row] == 0)[0]: # for item(col) that doesn't have a rating
-            for col in np.arange(self.nItem): # for all items
-#                 print(row, col, R[row][col])
-                idx_n = np.where(self.R_train[:, col] > 0)[0]# the idx of users who rated this item
-#                 print(idx_n)
-                if np.size(idx_n) < k:
-                    self.result[row][col] = self.R_train[idx_n, col].mean()
+class correlation_similarity():
+    def __init__(self, R_train, R_test, k):
+        '''initialize
+        R_train: 2D numpy array; R matrix in with r_{i, j} is the rating that user i given to item j
+        R_test: 2D numpy array; R matrix in with r_{i, j} is the rating that user i given to item j'''
+        self.R_train = R_train
+        self.R_test = R_test
+        self.k = k
+        self.nUser, self.nItem = R_train.shape
+        self.result = None
+        self.S = cosine_similarity(sparse.csr_matrix(R_train)) # similarity 
+        self.avg = np.mean(R_train)
+        
+    def predict(self, i, j):
+        '''predict the rating for user i of item j
+        i: int; the user number
+        j: int; the item number
+        k: int; use k nearest neighbors'''
+        if R_train[i][j] != 0:
+            return R_train[i][j]
+        else:
+            idxS_user = np.argsort(self.S[i])
+            idx_n = np.where(self.R_train[:, j] > 0)[0]
+
+            if np.size(idx_n) < self.k:
+                if np.size(idx_n) == 0: 
+#                     idxS_item = np.argsort(self.S_item[j]) # similarity between items
+                    v_j = self.R_train[:, j]
+                    prediction = v_j[v_j != 0].mean()
                 else:
-                    idx_knn = idxS[np.isin(idxS, idx_n, assume_unique = True)][-k-1:-1] # idxS with ratings
-#                     idx_knn = idx_n[np.argsort(S[row][idx_n])][-k:]# idx of k-nearest neighbors
-#                 print(idx_knn)
-                    self.result[row][col] = self.R_train[idx_knn, col].mean() # mean of the knn rating for this item
-        print('training is complete! it took %.2f s' % (time.time() - start_time))
-        return self.result
+                    prediction = self.R_train[idx_n, j].mean()
+            else:
+                idx_knn = idxS_user[np.isin(idxS_user, idx_n, assume_unique = True)][-self.k - 1:-1] # idxS with ratings
+                prediction = self.R_train[idx_knn, j].mean()
+            if np.isnan(prediction):
+                prediction = self.avg
+            return prediction
+
+    def sigma2(self, i, j):
+        if R_test[i][j] == 0:
+            print('No true value!')
+            return None
+        else:
+            r_hat = self.predict(i, j)
+            return (R_test[i][j] - r_hat)**2
+        
+    def test(self):
+        start_time = time.time()
+        iTest, jTest = self.R_test.nonzero()
+        totalError = 0
+        testCount = 0
+        for i, j in zip(iTest, jTest):
+            totalError += self.sigma2(i, j)
+            testCount += 1
+        mse = np.sqrt(totalError)/testCount         
+        print('testing is complete! it took %.2f s' % (time.time() - start_time))
+        print('the test error is %.4f' % mse)
+        return mse
