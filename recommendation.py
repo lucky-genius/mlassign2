@@ -9,7 +9,10 @@
 # rs.test(3)
 
 import numpy as np
+import time
 from astropy.io import ascii
+from sklearn.metrics.pairwise import cosine_similarity
+from scipy import sparse
 
 def make_R(filename, col_user, col_item, col_rating, fraction = 0.8):
     '''create R matrix from a file that contains a table of user IDs, item IDs and ratings
