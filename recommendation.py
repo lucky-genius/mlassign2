@@ -5,8 +5,8 @@
 # mf.train(k = 300, alpha = 0.01, _lambda = 0.01, iterations = 20)
 # mf.result
 # mf.mse()
-# rs = correlation_similarity(R_train, R_test, 3)
-# rs.test()
+# rs = correlation_similarity(R_train, R_test)
+# rs.test(3)
 
 import numpy as np
 from astropy.io import ascii
@@ -145,19 +145,18 @@ class matrix_factorization():
         return trainSigma, testSigma
         
 class correlation_similarity():
-    def __init__(self, R_train, R_test, k):
+    def __init__(self, R_train, R_test):
         '''initialize
         R_train: 2D numpy array; R matrix in with r_{i, j} is the rating that user i given to item j
         R_test: 2D numpy array; R matrix in with r_{i, j} is the rating that user i given to item j'''
         self.R_train = R_train
         self.R_test = R_test
-        self.k = k
         self.nUser, self.nItem = R_train.shape
         self.result = None
         self.S = cosine_similarity(sparse.csr_matrix(R_train)) # similarity 
         self.avg = np.mean(R_train)
         
-    def predict(self, i, j):
+    def predict(self, i, j, k):
         '''predict the rating for user i of item j
         i: int; the user number
         j: int; the item number
@@ -168,7 +167,7 @@ class correlation_similarity():
             idxS_user = np.argsort(self.S[i])
             idx_n = np.where(self.R_train[:, j] > 0)[0]
 
-            if np.size(idx_n) < self.k:
+            if np.size(idx_n) < k:
                 if np.size(idx_n) == 0: 
 #                     idxS_item = np.argsort(self.S_item[j]) # similarity between items
                     v_j = self.R_train[:, j]
@@ -176,29 +175,29 @@ class correlation_similarity():
                 else:
                     prediction = self.R_train[idx_n, j].mean()
             else:
-                idx_knn = idxS_user[np.isin(idxS_user, idx_n, assume_unique = True)][-self.k - 1:-1] # idxS with ratings
+                idx_knn = idxS_user[np.isin(idxS_user, idx_n, assume_unique = True)][-k - 1:-1] # idxS with ratings
                 prediction = self.R_train[idx_knn, j].mean()
             if np.isnan(prediction):
                 prediction = self.avg
             return prediction
 
-    def sigma2(self, i, j):
+    def sigma2(self, i, j, k):
         if R_test[i][j] == 0:
             print('No true value!')
             return None
         else:
-            r_hat = self.predict(i, j)
+            r_hat = self.predict(i, j, k)
             return (R_test[i][j] - r_hat)**2
         
-    def test(self):
+    def test(self, k):
         start_time = time.time()
         iTest, jTest = self.R_test.nonzero()
         totalError = 0
         testCount = 0
         for i, j in zip(iTest, jTest):
-            totalError += self.sigma2(i, j)
+            totalError += self.sigma2(i, j, k)
             testCount += 1
-        mse = np.sqrt(totalError)/testCount         
+        sigma = np.sqrt(totalError)/testCount         
         print('testing is complete! it took %.2f s' % (time.time() - start_time))
-        print('the test error is %.4f' % mse)
-        return mse
+        print('the test error is %.4f' % sigma)
+        return sigma
