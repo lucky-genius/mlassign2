@@ -2,11 +2,10 @@
 # from recommendation import *
 # R_train, R_test = make_R(filename = 'movie_ratings.csv', col_user = 'userId', col_item = 'movieId', col_rating = 'rating')
 # mf = recommendation_system(R_train, R_test, k = 300, alpha = 0.01, _lambda = 0.01, iterations = 20)
-# mf.train()
-# mf.full_matrix()
+# mf.matrix_factorization()
+# or mf.correlation_similarity(2)
+# mf.result
 # mf.mse()
-# i, j = 45, 500
-# mf.get_rating(i, j)
 
 import numpy as np
 from astropy.io import ascii
@@ -54,115 +53,116 @@ def make_R(filename, col_user, col_item, col_rating, fraction = 0.8):
 
 class recommendation_system():
 
-    def __init__(self, R_train, R_test, k, alpha, _lambda, iterations):
-        """
-        Perform matrix factorization to predict empty
-        entries in a matrix.
-
-        parameters:
-            R: 2D numpy array; R matrix in with r_{i, j} is the rating that user i given to item j
-            k: int; dimensions of u and v vector
-            alpha (float) : learning rate
-            _lambda (float)  : regularization parameter
-        """
-
+    def __init__(self, R_train, R_test):
+        '''R_train: 2D numpy array; R matrix in with r_{i, j} is the rating that user i given to item j'''
         self.R_train = R_train
         self.R_test = R_test
-        self.num_users, self.num_items = R_train.shape
+        self.nUser, self.nItem = R_train.shape
+        self.result = None
+
+    def matrix_factorization(self, k, alpha, _lambda, iterations):
+        '''perform matrix factorization to predict empty entries in a matrix.
+        parameters:
+            k: int; dimensions of u and v vector
+            alpha: float; learning rate
+            _lambda: float; regularization parameter'''
         self.k = k
         self.alpha = alpha
         self.iterations = iterations
         self._lambda = _lambda
+        
+        def sgd():
+            '''stochastic graident descent'''
+            for i, j, r in self.samples:
+                # Computer prediction and error
+                if _lambda is not None:
+                    prediction = self.b + self.b_u[i] + self.b_i[j] + self.U[i, :].dot(self.V[j, :].T)
+                    e = (r - prediction)
+                    # Update biases
+                    self.b_u[i] += self.alpha * (e - self._lambda * self.b_u[i])
+                    self.b_i[j] += self.alpha * (e - self._lambda * self.b_i[j])
 
-    def train(self):
+                    # Update user and item latent feature matrices
+                    self.U[i, :] += self.alpha * (e * self.V[j, :] - self._lambda * self.U[i,:])
+                    self.V[j, :] += self.alpha * (e * self.U[i, :] - self._lambda * self.V[j,:])
+                else:
+                    prediction = self.U[i, :].dot(self.V[j, :].T)
+                    e = (r - prediction)
+                    # Update user and item latent feature matrices
+                    self.U[i, :] += self.alpha * e * self.V[j, :]
+                    self.V[j, :] += self.alpha * e * self.U[i, :]
+                    
         start_time = time.time()
         # Initialize user and item latent feature matrice
-        self.U = np.random.normal(scale = 1./self.k, size = (self.num_users, self.k))
-        self.V = np.random.normal(scale = 1./self.k, size = (self.num_items, self.k))
+        self.U = np.random.normal(scale = 1./self.k, size = (self.nUser, self.k))
+        self.V = np.random.normal(scale = 1./self.k, size = (self.nItem, self.k))
         
-        if self.regularization() == True:
+        if _lambda is not None:
             # Initialize the biases
-            self.b_u = np.zeros(self.num_users)
-            self.b_i = np.zeros(self.num_items)
+            self.b_u = np.zeros(self.nUser)
+            self.b_i = np.zeros(self.nItem)
             self.b = np.mean(self.R_train[np.where(self.R_train != 0)])
 
         # Create a list of training samples
         self.samples = [
             (i, j, self.R_train[i, j])
-            for i in range(self.num_users)
-            for j in range(self.num_items)
+            for i in range(self.nUser)
+            for j in range(self.nItem)
             if self.R_train[i, j] > 0
         ]
 
         # Perform stochastic gradient descent for number of iterations
-        training_process = []
         for i in range(self.iterations):
             np.random.shuffle(self.samples)
-            self.sgd()
-            mse_train, mse_test = self.mse()
-            training_process.append((i, mse_train, mse_test))
+            sgd()
+#             mse_train, mse_test = self.mse()
             if (i + 1) % 10 == 0:
-                print("Iteration: %d ; train error = %.4f; test error = %.4f" % (i + 1, mse_train, mse_test))
+                print("Iteration: %d " % (i + 1))
+#                 print("Iteration: %d ; train error = %.4f; test error = %.4f" % (i + 1, mse_train, mse_test))
                 
+        if _lambda is not None:
+            self.result = self.b + self.b_u[:,np.newaxis] + self.b_i[np.newaxis:,] + self.U.dot(self.V.T)
+        else:
+            self.result = self.U.dot(self.V.T)
+        
+        mse_train, mse_test = self.mse()
         print('training is complete! it took %.2f s' % (time.time() - start_time))
-        return training_process
+        print("train error = %.4f; test error = %.4f" % (mse_train, mse_test))
+        return self.result
     
-    def regularization(self):
-        '''If we want to regularize the result'''
-        return False if self._lambda is None else True
-
     def mse(self):
-        """Compute the total mean square error for training and testing data
-        """
+        '''Compute the total mean square error for training and testing data'''
         xTrain, yTrain = self.R_train.nonzero()
         xTest, yTest = self.R_test.nonzero()
-        predicted = self.full_matrix()
         trainError, testError = 0, 0
         for x, y in zip(xTrain, yTrain):
-            trainError += pow(self.R_train[x, y] - predicted[x, y], 2)
+            trainError += pow(self.R_train[x, y] - self.result[x, y], 2)
             
         for x, y in zip(xTest, yTest):
-            testError += pow(self.R_test[x, y] - predicted[x, y], 2)
+            testError += pow(self.R_test[x, y] - self.result[x, y], 2)
             
         return np.sqrt(trainError), np.sqrt(testError)
-
-    def sgd(self):
-        """
-        Perform stochastic graident descent
-        """
-        for i, j, r in self.samples:
-            # Computer prediction and error
-            prediction = self.get_rating(i, j)
-            e = (r - prediction)
-            
-            if self.regularization() == True:
-                # Update biases
-                self.b_u[i] += self.alpha * (e - self._lambda * self.b_u[i])
-                self.b_i[j] += self.alpha * (e - self._lambda * self.b_i[j])
-
-                # Update user and item latent feature matrices
-                self.U[i, :] += self.alpha * (e * self.V[j, :] - self._lambda * self.U[i,:])
-                self.V[j, :] += self.alpha * (e * self.U[i, :] - self._lambda * self.V[j,:])
-            else:
-                # Update user and item latent feature matrices
-                self.U[i, :] += self.alpha * e * self.V[j, :]
-                self.V[j, :] += self.alpha * e * self.U[i, :]
-
-    def get_rating(self, i, j):
-        """
-        Get the predicted rating of user i and item j
-        """
-        if self.regularization() == True:
-            prediction = self.b + self.b_u[i] + self.b_i[j] + self.U[i, :].dot(self.V[j, :].T)
-        else:
-            prediction = self.U[i, :].dot(self.V[j, :].T)
-        return prediction
-
-    def full_matrix(self):
-        """
-        Computer the full matrix using the resultant biases, P and Q
-        """
-        if self.regularization() == True:
-            return self.b + self.b_u[:,np.newaxis] + self.b_i[np.newaxis:,] + self.U.dot(self.V.T)
-        else:
-            return self.U.dot(self.V.T)
+        
+    def correlation_similarity(self, k):
+        start_time = time.time()
+        self.result = self.R_train.copy()
+#         R_normal = (R.T - np.nanmean(R, axis = 1)).T # normalizing with the average
+        
+        R_sparse = sparse.csr_matrix(self.R_train)
+        S = cosine_similarity(R_sparse) # similarity 
+        for row in np.arange(self.nUser): # for all users
+            idxS = np.argsort(S[row])
+#             for col in np.where(R[row] == 0)[0]: # for item(col) that doesn't have a rating
+            for col in np.arange(self.nItem): # for all items
+#                 print(row, col, R[row][col])
+                idx_n = np.where(self.R_train[:, col] > 0)[0]# the idx of users who rated this item
+#                 print(idx_n)
+                if np.size(idx_n) < k:
+                    self.result[row][col] = self.R_train[idx_n, col].mean()
+                else:
+                    idx_knn = idxS[np.isin(idxS, idx_n, assume_unique = True)][-k-1:-1] # idxS with ratings
+#                     idx_knn = idx_n[np.argsort(S[row][idx_n])][-k:]# idx of k-nearest neighbors
+#                 print(idx_knn)
+                    self.result[row][col] = self.R_train[idx_knn, col].mean() # mean of the knn rating for this item
+        print('training is complete! it took %.2f s' % (time.time() - start_time))
+        return self.result
