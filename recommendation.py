@@ -164,8 +164,8 @@ class correlation_similarity():
         i: int; the user number
         j: int; the item number
         k: int; use k nearest neighbors'''
-        if R_train[i][j] != 0:
-            return R_train[i][j]
+        if self.R_train[i][j] != 0:
+            return self.R_train[i][j]
         else:
             idxS_user = np.argsort(self.S[i])
             idx_n = np.where(self.R_train[:, j] > 0)[0]
@@ -185,12 +185,12 @@ class correlation_similarity():
             return prediction
 
     def sigma2(self, i, j, k):
-        if R_test[i][j] == 0:
+        if self.R_test[i][j] == 0:
             print('No true value!')
             return None
         else:
             r_hat = self.predict(i, j, k)
-            return (R_test[i][j] - r_hat)**2
+            return (self.R_test[i][j] - r_hat)**2
         
     def test(self, k):
         start_time = time.time()
