@@ -11,8 +11,6 @@
 import numpy as np
 import time
 from astropy.io import ascii
-from sklearn.metrics.pairwise import cosine_similarity
-from scipy import sparse
 
 def make_R(filename, col_user, col_item, col_rating, fraction = 0.8):
     '''create R matrix from a file that contains a table of user IDs, item IDs and ratings
@@ -156,7 +154,6 @@ class correlation_similarity():
         self.R_test = R_test
         self.nUser, self.nItem = R_train.shape
         self.result = None
-        self.S = cosine_similarity(sparse.csr_matrix(R_train)) # similarity 
         self.avg = np.mean(R_train)
         
     def predict(self, i, j, k):
@@ -167,12 +164,12 @@ class correlation_similarity():
         if self.R_train[i][j] != 0:
             return self.R_train[i][j]
         else:
-            idxS_user = np.argsort(self.S[i])
+            S_user = [1 - spatial.distance.cosine(self.R_train[i], self.R_train[u]) for u in np.arange(self.nUser)]
+            idxS_user = np.argsort(S_user)
             idx_n = np.where(self.R_train[:, j] > 0)[0]
 
             if np.size(idx_n) < k:
                 if np.size(idx_n) == 0: 
-#                     idxS_item = np.argsort(self.S_item[j]) # similarity between items
                     v_j = self.R_train[:, j]
                     prediction = v_j[v_j != 0].mean()
                 else:
@@ -197,6 +194,7 @@ class correlation_similarity():
         iTest, jTest = self.R_test.nonzero()
         totalError = 0
         testCount = 0
+        print(np.size(iTest))
         for i, j in zip(iTest, jTest):
             totalError += self.sigma2(i, j, k)
             testCount += 1
